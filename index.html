@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Floor Plan Layout Tool</title>
+<style>
+:root{--bg:#fff;--fg:#1a1a1a;--pn:#f1f1ee;--bd:#cfcfc9;--ac:#1d4ed8;--ms:#d9480f;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#181818;--fg:#ececec;--pn:#242424;--bd:#464646;--ac:#7aa2ff;--ms:#ff8a4c}}
+:root[data-theme="dark"]{--bg:#181818;--fg:#ececec;--pn:#242424;--bd:#464646;--ac:#7aa2ff;--ms:#ff8a4c}
+html,body{height:100%}
+body{margin:0;display:flex;background:var(--bg);color:var(--fg);font:13px/1.4 system-ui,sans-serif}
+#side{width:270px;flex:none;overflow-y:auto;background:var(--pn);border-right:1px solid var(--bd);padding:10px}
+h3{margin:14px 0 6px;font-size:13px}h3:first-child{margin-top:0}
+.row{display:flex;gap:4px;flex-wrap:wrap;margin:4px 0;align-items:center}
+button,input,select{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--bd);border-radius:4px;padding:3px 6px}
+button{cursor:pointer}button.on{background:var(--ac);color:var(--bg);border-color:var(--ac)}
+input[type=number]{width:62px}input#sn,input#cn{width:100%;box-sizing:border-box}
+#pal{display:flex;flex-wrap:wrap;gap:4px}#pal button{cursor:grab}
+.note{color:var(--fg);opacity:.7;font-size:12px}
+label{display:flex;gap:4px;align-items:center}
+#main{flex:1;position:relative;min-width:0}
+#cv{width:100%;height:100%;display:block;touch-action:none;background:var(--bg)}
+#hint{position:absolute;left:8px;top:8px;background:var(--pn);border:1px solid var(--bd);border-radius:4px;padding:4px 8px;pointer-events:none}
+#calbar{position:absolute;left:50%;top:44px;transform:translateX(-50%);background:var(--pn);border:1px solid var(--bd);border-radius:4px;padding:8px;display:flex;gap:6px;align-items:center}
+#zoom{position:absolute;right:8px;top:8px;display:flex;gap:4px}
+.t{fill:var(--fg);stroke:var(--bg);paint-order:stroke;stroke-linejoin:round;pointer-events:none}
+.it{stroke:var(--fg)}.it.sel{stroke:var(--ac)}
+.ms{stroke:var(--ms);fill:none}.md{fill:var(--ms)}.tm{fill:var(--ms)}
+[hidden]{display:none!important}
+@media (max-width:700px){body{flex-direction:column}#side{width:auto;max-height:45%;border-right:0;border-bottom:1px solid var(--bd)}}
+</style></head><body>
+<div id="side">
+<h3>1. Floor plan</h3>
+<input type="file" id="file" accept="image/*">
+<div class="row"><button id="bCal">Set scale</button><button id="bMeas">Measure</button><button id="bClr">Clear measures</button></div>
+<div id="scl" class="note"></div><div id="sync" class="note"></div>
+<h3>2. Furniture <span class="note">(click or drag onto plan)</span></h3>
+<div id="pal"></div>
+<div class="row"><input id="cn" value="Custom"></div>
+<div class="row"><input id="cw" type="number" value="48" min="1"> × <input id="cd" type="number" value="24" min="1"> <span class="ul"></span> <button id="cadd">Add custom</button></div>
+<h3>3. Selected</h3>
+<div id="selp" hidden>
+<div class="row"><input id="sn"></div>
+<div class="row"><label>W <input id="sw" type="number" step="0.5" min="1"></label><label>D <input id="sd" type="number" step="0.5" min="1"></label><span class="ul"></span></div>
+<div class="row"><label>Rotation <input id="sr" type="number" step="5"></label>°</div>
+<div class="row"><button id="bRL">⟲ 90°</button><button id="bRR">⟳ 90°</button><button id="bDup">Duplicate</button><button id="bDel">Delete</button></div>
+</div>
+<div id="nosel" class="note">Click a piece to edit its size and rotation.</div>
+<h3>Units</h3>
+<div class="row"><select id="un"><option value="imp">Feet / inches</option><option value="met">Metric (m / cm)</option></select><button id="bAll">Remove all furniture</button></div>
+<p class="note">Wheel = zoom, drag background = pan. Keys: R rotate 90°, arrows nudge (Shift = bigger), Del delete, Ctrl+D duplicate, Esc cancel tool. Layout autosaves in this browser.</p>
+</div>
+<div id="main">
+<svg id="cv"><g id="view"><image id="plan" x="0" y="0" preserveAspectRatio="none"/><g id="items"></g><g id="ov"></g></g></svg>
+<div id="hint"></div>
+<div id="zoom"><button id="zi">+</button><button id="zo">−</button><button id="zf">Fit</button></div>
+<div id="calbar" hidden>Real length: <input id="clen" placeholder="e.g. 12ft, 12'6&quot;, 3.5m" size="16"><button id="cok">Apply</button><button id="cno">Cancel</button></div>
+</div>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script>
+// Paste your Firebase web-app config here (see README.md). Leave databaseURL empty for local-only mode.
+const firebaseConfig = {
+  apiKey: "AIzaSyBTke1eg2SBO-vq6Q7sBA8uB50UFudZOug",
+  authDomain: "floor-plan-9825c.firebaseapp.com",
+  databaseURL: "https://floor-plan-9825c-default-rtdb.firebaseio.com",
+  projectId: "floor-plan-9825c",
+  storageBucket: "floor-plan-9825c.firebasestorage.app",
+  messagingSenderId: "350821470520",
+  appId: "1:350821470520:web:95d236b8499c67cca6f1cd"
+};
+const $=id=>document.getElementById(id),svg=$('cv'),view=$('view'),imgEl=$('plan'),gI=$('items'),gO=$('ov'),NS='http://www.w3.org/2000/svg';
+const PRESETS=[['Sofa',84,36],['Loveseat',60,36],['Armchair',34,34],['Coffee table',48,24],['TV stand',60,16],['Twin bed',38,75],['Full bed',54,75],['Queen bed',60,80],['King bed',76,80],['Nightstand',20,16],['Dresser',60,18],['Desk',60,30],['Office chair',24,24],['Dining table',72,36],['Round table',48,48,1],['Dining chair',18,18],['Bookshelf',36,12],['Fridge',36,30],['Washer/dryer',27,30],['Rug 5×8',60,96]];
+let S={img:null,ppi:2,cal:false,items:[],meas:[],sel:null,units:'imp'},uid=()=>Math.random().toString(36).slice(2,10)+Date.now().toString(36),V={x:0,y:0,z:1},mode='sel',tmp=[],mp=null,drag=null,calPx=0,saveT=0;
+const U=()=>S.units==='met'?2.54:1,cur=()=>S.items.find(i=>i.id===S.sel);
+function el(t,a,p,s){const e=document.createElementNS(NS,t);for(const k in a)e.setAttribute(k,a[k]);if(p)p.appendChild(e);if(s!=null)e.textContent=s;return e}
+function fmt(inch){if(S.units==='met'){const c=inch*2.54;return c>=100?(c/100).toFixed(2)+' m':c.toFixed(c<10?1:0)+' cm'}
+ const r=Math.round(inch*4)/4,f=Math.floor(r/12),i=r-f*12;return f?`${f}' ${+i.toFixed(2)}"`:`${+i.toFixed(2)}"`}
+function parseLen(s){s=s.trim().toLowerCase();let m=s.match(/^(\d+(?:\.\d+)?)\s*(?:ft|feet|foot|')\s*(\d+(?:\.\d+)?)?\s*(?:in|inch|inches|")?$/);if(m)return +m[1]*12+(+m[2]||0);
+ m=s.match(/^(\d+(?:\.\d+)?)\s*(mm|cm|m|in|inch|inches|"|ft|feet|')?$/);if(!m)return 0;const u=m[2]||(S.units==='met'?'m':'ft');
+ return +m[1]*({mm:1/25.4,cm:1/2.54,m:100/2.54,in:1,inch:1,inches:1,'"':1,ft:12,feet:12,"'":12}[u])}
+function wp(e){const r=svg.getBoundingClientRect();return{x:(e.clientX-r.left-V.x)/V.z,y:(e.clientY-r.top-V.y)/V.z}}
+function txt(p,x,y,s,fs){return el('text',{x,y,class:'t','font-size':fs||12/V.z,'text-anchor':'middle','dominant-baseline':'middle','stroke-width':3/V.z},p,s)}
+function rot(it,lx,ly){const r=it.rot*Math.PI/180,c=Math.cos(r),s=Math.sin(r);return[it.x+lx*c-ly*s,it.y+lx*s+ly*c]}
+function render(){
+ view.setAttribute('transform',`translate(${V.x} ${V.y}) scale(${V.z})`);gI.innerHTML='';gO.innerHTML='';
+ for(const it of S.items){const w=it.w*S.ppi,d=it.d*S.ppi,sel=it.id===S.sel;
+  const g=el('g',{transform:`translate(${it.x} ${it.y}) rotate(${it.rot})`,'data-id':it.id,style:'cursor:move'},gI);
+  const a={fill:it.c,'fill-opacity':.6,class:sel?'it sel':'it','stroke-width':sel?3:1.5,'vector-effect':'non-scaling-stroke'};
+  if(it.round)el('ellipse',{rx:w/2,ry:d/2,...a},g);else el('rect',{x:-w/2,y:-d/2,width:w,height:d,...a},g)}
+ for(const it of S.items){const w=it.w*S.ppi,d=it.d*S.ppi,sel=it.id===S.sel,big=Math.max(w,d)*V.z>70;
+  if(big||sel){txt(gO,it.x,it.y-7/V.z,it.name);txt(gO,it.x,it.y+7/V.z,fmt(it.w)+' × '+fmt(it.d),10/V.z)}
+  if(sel){const o=16/V.z,a=rot(it,0,-d/2-o),b=rot(it,-w/2-o,0);txt(gO,a[0],a[1],'W '+fmt(it.w));txt(gO,b[0],b[1],'D '+fmt(it.d))}}
+ const seg=(p,q,lab)=>{el('line',{x1:p.x,y1:p.y,x2:q.x,y2:q.y,class:'ms','stroke-width':2,'vector-effect':'non-scaling-stroke'},gO);
+  for(const k of[p,q])el('circle',{cx:k.x,cy:k.y,r:4/V.z,class:'md'},gO);
+  const t=txt(gO,(p.x+q.x)/2,(p.y+q.y)/2-10/V.z,lab);t.setAttribute('class','t tm')};
+ const D=(p,q)=>Math.hypot(p.x-q.x,p.y-q.y)/S.ppi;
+ for(const m of S.meas)seg(m.a,m.b,fmt(D(m.a,m.b)));
+ if(tmp.length===2)seg(tmp[0],tmp[1],mode==='cal'?'enter real length':fmt(D(tmp[0],tmp[1])));
+ else if(tmp.length===1){const q=mp||tmp[0];seg(tmp[0],q,mode==='cal'?'':fmt(D(tmp[0],q)))}
+ queueSave()}
+function sync(){const i=cur();$('selp').hidden=!i;$('nosel').hidden=!!i;
+ document.querySelectorAll('.ul').forEach(s=>s.textContent=S.units==='met'?'cm':'in');
+ if(!i)return;$('sn').value=i.name;$('sw').value=+(i.w/U()).toFixed(1);$('sd').value=+(i.d/U()).toFixed(1);$('sr').value=Math.round(i.rot*10)/10}
+function status(){$('scl').textContent=!S.img?'Upload a plan image (PNG/JPG), then set the scale.':S.cal?`Scale set (${(S.ppi*12).toFixed(1)} px per ft).`:'Scale not set: use "Set scale" and click two points a known distance apart, or furniture will not match the plan.'}
+function setMode(m){mode=m;tmp=[];mp=null;calPx=0;$('calbar').hidden=true;$('bCal').classList.toggle('on',m==='cal');$('bMeas').classList.toggle('on',m==='meas');
+ $('hint').textContent={sel:S.img?'Drag furniture to move. Drag background to pan, wheel to zoom.':'Upload a floor plan image to begin, or add furniture to a blank canvas.',cal:'Click two points a known distance apart (e.g. both ends of a wall).',meas:'Click two points to measure. Click Measure again to stop.'}[m];render()}
+function fit(){const r=svg.getBoundingClientRect(),w=S.img?S.img.w:1000,h=S.img?S.img.h:700;V.z=Math.min(r.width/w,r.height/h)*.95;V.x=(r.width-w*V.z)/2;V.y=(r.height-h*V.z)/2;render()}
+function setImg(img){S.img=img;imgEl.setAttribute('href',img.src);imgEl.setAttribute('width',img.w);imgEl.setAttribute('height',img.h)}
+$('file').onchange=e=>{const f=e.target.files[0];if(!f)return;const fr=new FileReader();fr.onload=()=>{const im=new Image();im.onload=()=>{
+ const k=Math.min(1,1800/Math.max(im.width,im.height)),w=Math.round(im.width*k),h=Math.round(im.height*k),c=document.createElement('canvas');c.width=w;c.height=h;
+ const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,w,h);x.drawImage(im,0,0,w,h);
+ setImg({src:c.toDataURL('image/jpeg',.8),w,h});S.cal=false;S.ppi=w/480;S.meas=[];putImg();putMeta();putMeas();status();setMode('sel');fit()};im.src=fr.result};fr.readAsDataURL(f)};
+function add(name,w,d,round,at){const r=svg.getBoundingClientRect(),p=at||{x:(r.width/2-V.x)/V.z,y:(r.height/2-V.y)/V.z};
+ const it={id:uid(),name,w,d,round:!!round,x:p.x,y:p.y,rot:0,c:`hsl(${Math.floor(Math.random()*360)} 55% 55%)`};S.items.push(it);S.sel=it.id;putItem(it);sync();render()}
+PRESETS.forEach((p,i)=>{const b=document.createElement('button');b.textContent=p[0];b.title=p[1]+'" × '+p[2]+'"';b.draggable=true;
+ b.onclick=()=>add(p[0],p[1],p[2],p[3]);b.ondragstart=e=>e.dataTransfer.setData('text/plain',String(i));$('pal').appendChild(b)});
+svg.ondragover=e=>e.preventDefault();
+svg.ondrop=e=>{e.preventDefault();const p=PRESETS[+e.dataTransfer.getData('text/plain')];if(p)add(p[0],p[1],p[2],p[3],wp(e))};
+$('cadd').onclick=()=>{const w=parseFloat($('cw').value)*U(),d=parseFloat($('cd').value)*U();if(w>0&&d>0)add($('cn').value||'Custom',w,d)};
+svg.addEventListener('pointerdown',e=>{if(calPx)return;const p=wp(e);
+ if(mode!=='sel'){tmp.push(p);if(tmp.length===2){if(mode==='cal'){calPx=Math.hypot(tmp[0].x-tmp[1].x,tmp[0].y-tmp[1].y);$('calbar').hidden=false;$('clen').value='';$('clen').focus()}else{S.meas.push({id:uid(),a:tmp[0],b:tmp[1]});tmp=[];putMeas()}}render();return}
+ const g=e.target.closest('[data-id]');
+ if(g){S.sel=g.dataset.id;const it=cur();drag={t:'i',dx:it.x-p.x,dy:it.y-p.y}}else{S.sel=null;drag={t:'p',sx:e.clientX,sy:e.clientY,vx:V.x,vy:V.y}}
+ svg.setPointerCapture(e.pointerId);sync();render()});
+svg.addEventListener('pointermove',e=>{if(drag){if(drag.t==='i'){const p=wp(e),i=cur();i.x=p.x+drag.dx;i.y=p.y+drag.dy;putItem(i)}else{V.x=drag.vx+e.clientX-drag.sx;V.y=drag.vy+e.clientY-drag.sy}render()}
+ else if(tmp.length===1&&!calPx){mp=wp(e);render()}});
+svg.addEventListener('pointerup',()=>{if(drag&&drag.t==='i'&&cur())putItem(cur(),1);drag=null});
+svg.addEventListener('wheel',e=>{e.preventDefault();zoom(Math.exp(-e.deltaY*.0015),e.clientX-svg.getBoundingClientRect().left,e.clientY-svg.getBoundingClientRect().top)},{passive:false});
+function zoom(k,mx,my){const r=svg.getBoundingClientRect();mx=mx??r.width/2;my=my??r.height/2;const nz=Math.min(20,Math.max(.05,V.z*k));V.x=mx-(mx-V.x)*nz/V.z;V.y=my-(my-V.y)*nz/V.z;V.z=nz;render()}
+$('zi').onclick=()=>zoom(1.3);$('zo').onclick=()=>zoom(1/1.3);$('zf').onclick=fit;
+$('bCal').onclick=()=>setMode(mode==='cal'?'sel':'cal');$('bMeas').onclick=()=>setMode(mode==='meas'?'sel':'meas');
+$('bClr').onclick=()=>{S.meas=[];putMeas();render()};
+$('cok').onclick=()=>{const L=parseLen($('clen').value);if(L>0){S.ppi=calPx/L;S.cal=true;putMeta();status();setMode('sel')}else $('clen').style.borderColor='var(--ms)'};
+$('cno').onclick=()=>setMode('sel');$('clen').onkeydown=e=>{if(e.key==='Enter')$('cok').click()};
+$('sn').oninput=()=>{const i=cur();if(i){i.name=$('sn').value;putItem(i);render()}};
+[['sw','w'],['sd','d'],['sr','rot']].forEach(([id,k])=>$(id).oninput=()=>{const i=cur(),v=parseFloat($(id).value);if(i&&!isNaN(v)&&(k==='rot'||v>0)){i[k]=k==='rot'?v:v*U();putItem(i);render()}});
+const turn=a=>{const i=cur();if(i){i.rot=((i.rot+a)%360+360)%360;putItem(i);sync();render()}};
+const del=()=>{const id=S.sel;S.items=S.items.filter(i=>i.id!==id);S.sel=null;rmItem(id);sync();render()};
+const dup=()=>{const i=cur();if(i){const n={...i,id:uid(),x:i.x+12*S.ppi,y:i.y+12*S.ppi};S.items.push(n);S.sel=n.id;putItem(n);sync();render()}};
+$('bRL').onclick=()=>turn(-90);$('bRR').onclick=()=>turn(90);$('bDel').onclick=del;$('bDup').onclick=dup;
+$('bAll').onclick=()=>{S.items=[];S.sel=null;rmAll();sync();render()};
+$('un').onchange=()=>{S.units=$('un').value;sync();render()};
+addEventListener('keydown',e=>{if(/INPUT|SELECT|TEXTAREA/.test(e.target.tagName))return;if(e.key==='Escape')return setMode('sel');
+ const i=cur();if(!i)return;const K=e.key;
+ if(K==='Delete'||K==='Backspace'){del();e.preventDefault()}
+ else if(K.toLowerCase()==='r')turn(e.shiftKey?-90:90);
+ else if((e.ctrlKey||e.metaKey)&&K.toLowerCase()==='d'){dup();e.preventDefault()}
+ else if(K.startsWith('Arrow')){const s=(e.shiftKey?12:1)*S.ppi;i.x+=K==='ArrowRight'?s:K==='ArrowLeft'?-s:0;i.y+=K==='ArrowDown'?s:K==='ArrowUp'?-s:0;e.preventDefault();putItem(i);render()}});
+const db=(()=>{try{if(FIREBASE_CONFIG.databaseURL){firebase.initializeApp(FIREBASE_CONFIG);return firebase.database()}}catch(_){}return null})();
+let R=null,fitted=0,tm={};
+function queueSave(){if(db)return;clearTimeout(saveT);saveT=setTimeout(()=>{const d={...S};try{localStorage.setItem('fp1',JSON.stringify(d))}catch(_){try{d.img=null;localStorage.setItem('fp1',JSON.stringify(d))}catch(_){}}},500)}
+function putItem(it,now){if(!R||(tm[it.id]&&!now))return;const f=()=>{tm[it.id]=0;const c=S.items.find(i=>i.id===it.id);if(c)R.child('items/'+c.id).set(c)};if(now)f();else tm[it.id]=setTimeout(f,60)}
+const rmItem=id=>R&&R.child('items/'+id).remove(),rmAll=()=>R&&R.child('items').remove(),
+putMeas=()=>R&&R.child('meas').set(Object.fromEntries(S.meas.map(m=>[m.id,{a:m.a,b:m.b}]))),
+putMeta=()=>R&&R.child('meta').set({ppi:S.ppi,cal:S.cal}),putImg=()=>R&&R.child('img').set(S.img);
+if(db){const m=location.hash.match(/room=([\w-]{12,})/),room=m?m[1]:localStorage.getItem('fp-room')||uid()+uid();
+ localStorage.setItem('fp-room',room);history.replaceState(null,'','#room='+room);R=db.ref('rooms/'+room);
+ R.child('items').on('value',s=>{const keep=S.items,dragId=drag&&drag.t==='i'?S.sel:null;
+  S.items=Object.values(s.val()||{}).map(i=>(i.id===dragId||tm[i.id])?(keep.find(x=>x.id===i.id)||i):i);
+  if(S.sel&&!cur())S.sel=null;if(!$('selp').contains(document.activeElement))sync();render()});
+ R.child('meas').on('value',s=>{S.meas=Object.entries(s.val()||{}).map(([id,m])=>({id,a:m.a,b:m.b}));render()});
+ R.child('meta').on('value',s=>{const m=s.val();if(m){S.ppi=m.ppi;S.cal=m.cal;status();render()}});
+ R.child('img').on('value',s=>{const v=s.val();if(v){setImg(v);if(!fitted){fitted=1;fit()}status();render()}});
+ db.ref('.info/connected').on('value',s=>{$('sync').textContent=s.val()?'Shared and synced. Send this page URL (with #room=...) to your partner.':'Offline. Changes sync when reconnected.'})}
+else try{const d=JSON.parse(localStorage.getItem('fp1')||'null');if(d){S={...S,...d};if(S.img)setImg(S.img);$('un').value=S.units}}catch(_){}
+$('sync').textContent=db?'Connecting…':'Local mode: saved in this browser only. See README to enable shared editing.';
+status();sync();setMode('sel');addEventListener('resize',fit);fit();
+</script></body></html>
