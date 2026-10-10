@@ -59,15 +59,7 @@ label{display:flex;gap:4px;align-items:center}
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
 <script>
 // Paste your Firebase web-app config here (see README.md). Leave databaseURL empty for local-only mode.
-const firebaseConfig = {
-  apiKey: "AIzaSyBTke1eg2SBO-vq6Q7sBA8uB50UFudZOug",
-  authDomain: "floor-plan-9825c.firebaseapp.com",
-  databaseURL: "https://floor-plan-9825c-default-rtdb.firebaseio.com",
-  projectId: "floor-plan-9825c",
-  storageBucket: "floor-plan-9825c.firebasestorage.app",
-  messagingSenderId: "350821470520",
-  appId: "1:350821470520:web:95d236b8499c67cca6f1cd"
-};
+const FIREBASE_CONFIG={apiKey:"",authDomain:"",databaseURL:"https://floor-plan-9825c-default-rtdb.firebaseio.com",projectId:"",appId:""};
 const $=id=>document.getElementById(id),svg=$('cv'),view=$('view'),imgEl=$('plan'),gI=$('items'),gO=$('ov'),NS='http://www.w3.org/2000/svg';
 const PRESETS=[['Sofa',84,36],['Loveseat',60,36],['Armchair',34,34],['Coffee table',48,24],['TV stand',60,16],['Twin bed',38,75],['Full bed',54,75],['Queen bed',60,80],['King bed',76,80],['Nightstand',20,16],['Dresser',60,18],['Desk',60,30],['Office chair',24,24],['Dining table',72,36],['Round table',48,48,1],['Dining chair',18,18],['Bookshelf',36,12],['Fridge',36,30],['Washer/dryer',27,30],['Rug 5×8',60,96]];
 let S={img:null,ppi:2,cal:false,items:[],meas:[],sel:null,units:'imp'},uid=()=>Math.random().toString(36).slice(2,10)+Date.now().toString(36),V={x:0,y:0,z:1},mode='sel',tmp=[],mp=null,drag=null,calPx=0,saveT=0;
@@ -146,7 +138,8 @@ addEventListener('keydown',e=>{if(/INPUT|SELECT|TEXTAREA/.test(e.target.tagName)
  else if(K.toLowerCase()==='r')turn(e.shiftKey?-90:90);
  else if((e.ctrlKey||e.metaKey)&&K.toLowerCase()==='d'){dup();e.preventDefault()}
  else if(K.startsWith('Arrow')){const s=(e.shiftKey?12:1)*S.ppi;i.x+=K==='ArrowRight'?s:K==='ArrowLeft'?-s:0;i.y+=K==='ArrowDown'?s:K==='ArrowUp'?-s:0;e.preventDefault();putItem(i);render()}});
-const db=(()=>{try{if(FIREBASE_CONFIG.databaseURL){firebase.initializeApp(FIREBASE_CONFIG);return firebase.database()}}catch(_){}return null})();
+let dbErr='';
+const db=(()=>{try{if(!FIREBASE_CONFIG.databaseURL){dbErr='databaseURL is empty';return null}if(typeof firebase==='undefined'){dbErr='Firebase SDK did not load (blocked or offline)';return null}firebase.initializeApp(FIREBASE_CONFIG);return firebase.database()}catch(e){dbErr=String(e.message||e)}return null})();
 let R=null,fitted=0,tm={};
 function queueSave(){if(db)return;clearTimeout(saveT);saveT=setTimeout(()=>{const d={...S};try{localStorage.setItem('fp1',JSON.stringify(d))}catch(_){try{d.img=null;localStorage.setItem('fp1',JSON.stringify(d))}catch(_){}}},500)}
 function putItem(it,now){if(!R||(tm[it.id]&&!now))return;const f=()=>{tm[it.id]=0;const c=S.items.find(i=>i.id===it.id);if(c)R.child('items/'+c.id).set(c)};if(now)f();else tm[it.id]=setTimeout(f,60)}
@@ -163,6 +156,6 @@ if(db){const m=location.hash.match(/room=([\w-]{12,})/),room=m?m[1]:localStorage
  R.child('img').on('value',s=>{const v=s.val();if(v){setImg(v);if(!fitted){fitted=1;fit()}status();render()}});
  db.ref('.info/connected').on('value',s=>{$('sync').textContent=s.val()?'Shared and synced. Send this page URL (with #room=...) to your partner.':'Offline. Changes sync when reconnected.'})}
 else try{const d=JSON.parse(localStorage.getItem('fp1')||'null');if(d){S={...S,...d};if(S.img)setImg(S.img);$('un').value=S.units}}catch(_){}
-$('sync').textContent=db?'Connecting…':'Local mode: saved in this browser only. See README to enable shared editing.';
+$('sync').textContent=db?'Connecting…':'Local mode ('+dbErr+'). See README.';
 status();sync();setMode('sel');addEventListener('resize',fit);fit();
 </script></body></html>
